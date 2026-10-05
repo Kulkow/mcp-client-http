@@ -1,0 +1,79 @@
+services:
+  mcp-server:
+    build:
+      context: ./mcp-server
+    container_name: mcp-server
+    restart: unless-stopped
+    ports:
+      - "${MCP_SERVER_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  mcp-client:
+    build:
+      context: ./mcp-client
+    container_name: mcp-client
+    restart: "no"
+    stdin_open: true
+    tty: true
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    environment:
+      # Для реального сервера переопределите переменную HTTPS-адресом.
+      MCP_URL: ${MCP_URL:-http://mcp-server:8000/mcp}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+
+      # Ollama работает на хосте и предоставляет OpenAI-compatible API.
+      OLLAMA_BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}/v1
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-ollama}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      USE_LLM: ${USE_LLM:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      QUERY: ${QUERY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mcp-client-http:
+    build:
+      context: ./mcp-client-http
+    container_name: mcp-client-http
+    restart: unless-stopped
+    ports:
+      - "${MCP_CLIENT_HTTP_PORT:-8086}:8086"
+    environment:
+      # Внешний MCP Streamable HTTP endpoint и его серверный Sanctum-токен.
+      MCP_URL: ${MCP_URL:-http://mcp-server:8000/mcp}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_TIMEOUT: ${MCP_TIMEOUT:-60}
+
+      # OpenAI-compatible endpoint локальной Ollama.
+      OLLAMA_BASE_URL: ${OLLAMA_HOST_URL:-http://host.docker.internal:11434}/v1
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-ollama}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+
+      # Необязательная защита browser API. Не совпадает с MCP_AUTH_TOKEN.
+      WEB_API_TOKEN: ${WEB_API_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      CONVERSATION_TTL: ${CONVERSATION_TTL:-3600}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8086/api/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
